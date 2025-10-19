@@ -1,0 +1,116 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.utils import resample
+
+
+df = pd.read_csv(r"C:\Users\Nandana\Downloads\complaints.csv (1)\complaints.csv",
+                 low_memory=False,
+                 nrows=100000)
+
+df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
+
+column_name = 'product'
+
+categories = {
+    "credit reporting, repair, or other": 0,
+    "debt collection": 1,
+    "consumer loan": 2,
+    "mortgage": 3
+}
+
+df[column_name] = df[column_name].str.lower()
+df = df[df[column_name].isin(categories.keys())]
+
+df = df.dropna(subset=['issue'])
+
+df['label'] = df[column_name].map(categories)
+
+
+print("\nCategory distribution before balancing:")
+print(df['product'].value_counts())
+
+df['product'].value_counts().plot(kind='bar', title="Number of Complaints per Category")
+plt.ylabel("Number of Complaints")
+plt.show()
+
+for cat, num in categories.items():
+    subset = df[df['product'] == cat]
+    if not subset.empty:
+        print(f"\nSample complaint for '{cat}':")
+        print(subset['issue'].iloc[0])
+    else:
+        print(f"\nNo complaints found for category '{cat}'")
+
+dfs = []
+max_count = df['product'].value_counts().max()  # Largest class size
+
+for cat in df['product'].unique():
+    subset = df[df['product'] == cat]
+    subset_upsampled = resample(subset, 
+                                replace=True, 
+                                n_samples=max_count, 
+                                random_state=42)
+    dfs.append(subset_upsampled)
+
+df_balanced = pd.concat(dfs)
+print("\nCategory distribution after balancing:")
+print(df_balanced['product'].value_counts())
+
+X = df_balanced['issue']
+y = df_balanced['label']
+
+vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
+X_tfidf = vectorizer.fit_transform(X)
+
+# Step 3: Selection of Multi-Classification Models
+X_train, X_test, y_train, y_test = train_test_split(
+    X_tfidf, y, test_size=0.2, random_state=42, stratify=y
+)
+
+models = {
+    "Logistic Regression": LogisticRegression(max_iter=1000),
+    "Multinomial NB": MultinomialNB(),
+    "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42),
+    "SVM": SVC(kernel='linear', probability=True)
+}
+
+trained_models = {}
+for name, model in models.items():
+    print(f"\nTraining {name}...")
+    model.fit(X_train, y_train)
+    trained_models[name] = model
+
+performance = {}
+for name, model in trained_models.items():
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    performance[name] = acc
+    print(f"\n=== {name} ===")
+    print("Accuracy:", acc)
+    print("Classification Report:\n", classification_report(y_test, y_pred))
+
+plt.bar(performance.keys(), performance.values())
+plt.ylabel("Accuracy")
+plt.title("Model Performance Comparison")
+plt.ylim(0,1.05)
+plt.show()
+
+y_pred_lr = trained_models["Logistic Regression"].predict(X_test)
+cm = confusion_matrix(y_test, y_pred_lr)
+print("\nConfusion Matrix (Logistic Regression):\n", cm)
+
+sample_text = ["I received a collection notice for a loan I already paid"]
+sample_tfidf = vectorizer.transform(sample_text)
+pred_label = trained_models["Logistic Regression"].predict(sample_tfidf)
+pred_category = [k for k, v in categories.items() if v == pred_label[0]][0]
+
+print("\nSample Text Prediction:")
+print(f"Text: {sample_text[0]}")
+print(f"Predicted Category: {pred_category}")
